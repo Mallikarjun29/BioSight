@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+torch
+torchvision
+python-multipart
+pymongo
+prometheus-client
+passlib[bcrypt]
+python-jose[cryptography]
+jinja2

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Results - BioSight</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>BioSight</h1>
+            </div>
+            <nav>
+                <a href="/" class="btn">Back to Upload</a>
+                <button onclick="logout()" class="btn btn-secondary">Logout</button>
+            </nav>
+        </header>
+
+        <main>
+            <h1>Classification Results</h1>
+            <div class="results-container">
+                {% for result in results %}
+                <div class="result-item">
+                    <p><strong>File:</strong> {{ result.filename }}</p>
+                    <p><strong>Predicted Class:</strong> {{ result.predicted_class }}</p>
+                </div>
+                {% endfor %}
+            </div>
+
+            {% if zip_file_path %}
+            <button class="btn" onclick="window.location.href='/download-zip/'">Download All as Zip</button>
+            {% endif %}
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', path='js/auth.js') }}"></script>
+    <script>
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        }
+    </script>
+</body>
+</html>

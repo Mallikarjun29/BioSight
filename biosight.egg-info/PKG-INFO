@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: biosight
+Version: 0.1
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: torch
+Requires-Dist: torchvision
+Requires-Dist: python-multipart
+Requires-Dist: pymongo
+Requires-Dist: prometheus-client
+Requires-Dist: passlib[bcrypt]
+Requires-Dist: python-jose[cryptography]
+Requires-Dist: jinja2
+Dynamic: requires-dist
