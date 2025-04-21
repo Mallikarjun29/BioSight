@@ -14,6 +14,9 @@
                 <h1>BioSight</h1>
             </div>
             <nav>
+                {% if zip_file_path %}
+                <button onclick="downloadZip()" class="btn">Download All as Zip</button>
+                {% endif %}
                 <a href="/" class="btn">Back to Upload</a>
                 <button onclick="logout()" class="btn btn-secondary">Logout</button>
             </nav>
@@ -21,18 +24,62 @@
 
         <main>
             <h1>Classification Results</h1>
-            <div class="results-container">
+            
+            <!-- Tabs for each class -->
+            <div class="tabs">
+                {% set classes = [] %}
                 {% for result in results %}
-                <div class="result-item">
-                    <p><strong>File:</strong> {{ result.filename }}</p>
-                    <p><strong>Predicted Class:</strong> {{ result.predicted_class }}</p>
-                </div>
+                    {% if result.predicted_class not in classes %}
+                        {% set _ = classes.append(result.predicted_class) %}
+                    {% endif %}
+                {% endfor %}
+                {% set sorted_classes = (classes | reject('equalto', 'unknown') | list | sort) %}
+                {% if 'unknown' in classes %}
+                    {% set _ = sorted_classes.append('unknown') %}
+                {% endif %}
+                {% for class_name in sorted_classes %}
+                    <button class="tab-button" data-tab="{{ class_name }}">{{ class_name }}</button>
                 {% endfor %}
             </div>
 
-            {% if zip_file_path %}
-            <button class="btn" onclick="window.location.href='/download-zip/'">Download All as Zip</button>
-            {% endif %}
+            <!-- Tab Content -->
+            {% for class_name in sorted_classes %}
+            <div id="tab-{{ class_name }}" class="tab-content">
+                <div class="results-container">
+                    {% for result in results %}
+                        {% if result.predicted_class == class_name %}
+                        <div class="result-item" id="image-{{ result.saved_path.split('/')[-1] }}">
+                            <div class="image-preview">
+                                <img src="/organized/{{ result.predicted_class }}/{{ result.saved_path.split('/')[-1] }}" alt="{{ result.filename }}" class="result-image">
+                                <button class="delete-btn" onclick="deleteImage('{{ result.predicted_class }}', '{{ result.saved_path.split('/')[-1] }}')">
+                                    ×
+                                </button>
+                            </div>
+                            <div class="result-details">
+                                <p><strong>File:</strong> {{ result.filename }}</p>
+                                <div class="class-selection">
+                                    <label><strong>Class:</strong></label>
+                                    <select 
+                                        onchange="updateClass('{{ result.predicted_class }}', '{{ result.saved_path.split('/')[-1] }}', this.value)"
+                                        class="class-dropdown {% if result.is_updated %}updated{% endif %}"
+                                    >
+                                        {% for class_name in ["Amphibia", "Animalia", "Arachnida", "Aves", "Fungi", "Insecta", "Mammalia", "Mollusca", "Plantae", "Reptilia", "unknown"] %}
+                                            <option value="{{ class_name }}" {% if class_name == result.predicted_class %}selected{% endif %}>
+                                                {{ class_name }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                    {% if result.is_updated %}
+                                    <span class="update-badge" title="Classification updated">★</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
         </main>
     </div>
 
@@ -41,6 +88,251 @@
         function logout() {
             localStorage.removeItem('token');
             window.location.href = '/login';
+        }
+
+        // Tab functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Attach tab click handlers to the tabs container using event delegation
+            const tabsContainer = document.querySelector('.tabs');
+            tabsContainer.addEventListener('click', (e) => {
+                const clickedTab = e.target.closest('.tab-button');
+                if (clickedTab) {
+                    const tabId = clickedTab.getAttribute('data-tab');
+                    
+                    // Remove active class from all tabs
+                    document.querySelectorAll('.tab-button').forEach(t => t.classList.remove('active'));
+                    
+                    // Add active class to clicked tab
+                    clickedTab.classList.add('active');
+                    
+                    // Show selected tab content
+                    showTab(tabId);
+                }
+            });
+
+            // Show first tab by default
+            const firstTab = document.querySelector('.tab-button');
+            if (firstTab) {
+                const firstTabId = firstTab.getAttribute('data-tab');
+                showTab(firstTabId);
+                firstTab.classList.add('active');
+            }
+        });
+
+        function showTab(tabId) {
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => {
+                if (content.id === `tab-${tabId}`) {
+                    content.classList.add('active');
+                } else {
+                    content.classList.remove('active');
+                }
+            });
+        }
+
+        async function deleteImage(predictedClass, filename) {
+            if (!confirm('Are you sure you want to delete this image?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/delete-image/${predictedClass}/${filename}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    // Remove the image from the DOM
+                    const imageElement = document.getElementById(`image-${filename}`);
+                    if (imageElement) {
+                        imageElement.remove();
+                    }
+
+                    // Check if this was the last image in the tab
+                    const tab = document.getElementById(`tab-${predictedClass}`);
+                    if (tab && tab.querySelector('.result-item') === null) {
+                        // Remove the tab and its button if it's empty
+                        const tabButton = document.querySelector(`[data-tab="${predictedClass}"]`);
+                        if (tabButton) {
+                            tabButton.remove();
+                        }
+                        tab.remove();
+
+                        // Show another tab if available
+                        const remainingTabs = document.querySelectorAll('.tab-button');
+                        if (remainingTabs.length > 0) {
+                            const firstTab = remainingTabs[0];
+                            const firstTabId = firstTab.getAttribute('data-tab');
+                            showTab(firstTabId);
+                            firstTab.classList.add('active');
+                        }
+                    }
+                } else {
+                    const error = await response.json();
+                    alert(`Error deleting image: ${error.detail}`);
+                }
+            } catch (error) {
+                alert('Error deleting image. Please try again.');
+                console.error('Error:', error);
+            }
+        }
+
+        async function updateClass(oldClass, filename, newClass) {
+
+            try {
+                // Use the current class from the image path (more reliable)
+                const img = document.getElementById(`image-${filename}`).querySelector('img');
+                const currentSrc = img.src;
+                const pathParts = currentSrc.split('/');
+                const currentClass = pathParts[pathParts.indexOf('organized') + 1];
+                
+                const response = await fetch(`/update-class/${currentClass}/${filename}?new_class=${newClass}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    const imageElement = document.getElementById(`image-${filename}`);
+                    if (imageElement) {
+                        // Update the image source to the new path
+                        if (img) {
+                            img.src = img.src.replace(`/${currentClass}/`, `/${newClass}/`);
+                        }
+
+                        // Handle visual update indicators
+                        const select = imageElement.querySelector('.class-dropdown');
+                        const existingBadge = imageElement.querySelector('.update-badge');
+                        
+                        // Update or remove visual indicators based on whether we're reverting to original class
+                        if (result.is_updated) {
+                            select.classList.add('updated');
+                            if (!existingBadge) {
+                                const badge = document.createElement('span');
+                                badge.className = 'update-badge';
+                                badge.title = 'Classification updated';
+                                badge.textContent = '★';
+                                select.parentNode.appendChild(badge);
+                            }
+                        } else {
+                            select.classList.remove('updated');
+                            if (existingBadge) {
+                                existingBadge.remove();
+                            }
+                        }
+
+                        // Get tab elements
+                        const currentTab = document.getElementById(`tab-${currentClass}`);
+                        const newTab = document.getElementById(`tab-${newClass}`);
+                        
+                        // Check if original tab exists, if not create it
+                        let newTabExists = true;
+                        if (!newTab) {
+                            newTabExists = false;
+                            // Create new tab container
+                            const newTabContent = document.createElement('div');
+                            newTabContent.id = `tab-${newClass}`;
+                            newTabContent.className = 'tab-content';
+                            const resultsContainer = document.createElement('div');
+                            resultsContainer.className = 'results-container';
+                            newTabContent.appendChild(resultsContainer);
+                            document.querySelector('main').appendChild(newTabContent);
+                            
+                            // Create and insert new tab button
+                            const tabsContainer = document.querySelector('.tabs');
+                            const newTabButton = document.createElement('button');
+                            newTabButton.className = 'tab-button';
+                            newTabButton.setAttribute('data-tab', newClass);
+                            newTabButton.textContent = newClass;
+                            
+                            newTabButton.addEventListener('click', () => {
+                                document.querySelectorAll('.tab-button').forEach(t => t.classList.remove('active'));
+                                newTabButton.classList.add('active');
+                                showTab(newClass);
+                            });
+                            
+                            // Insert tab button in sorted order
+                            const buttons = Array.from(tabsContainer.querySelectorAll('.tab-button'));
+                            const insertIndex = buttons.findIndex(button => {
+                                const tabName = button.getAttribute('data-tab');
+                                if (tabName === 'unknown') return true;
+                                if (newClass === 'unknown') return false;
+                                return tabName.localeCompare(newClass) > 0;
+                            });
+                            
+                            if (insertIndex === -1) {
+                                tabsContainer.appendChild(newTabButton);
+                            } else {
+                                tabsContainer.insertBefore(newTabButton, buttons[insertIndex]);
+                            }
+                        }
+
+                        // Move the image to the new tab
+                        const targetContainer = document.querySelector(`#tab-${newClass} .results-container`);
+                        if (targetContainer) {
+                            targetContainer.appendChild(imageElement);
+                        }
+
+                        // Handle the old tab if it's now empty
+                        if (currentTab && !currentTab.querySelector('.result-item')) {
+                            const oldTabButton = document.querySelector(`[data-tab="${currentClass}"]`);
+                            if (oldTabButton) {
+                                oldTabButton.remove();
+                                currentTab.remove();
+                            }
+                        }
+
+                        // Switch to the target tab
+                        document.querySelectorAll('.tab-button').forEach(t => t.classList.remove('active'));
+                        const newTabButton = document.querySelector(`[data-tab="${newClass}"]`);
+                        if (newTabButton) {
+                            newTabButton.classList.add('active');
+                            showTab(newClass);
+                        }
+                    }
+                } else {
+                    const error = await response.json();
+                    alert(`Error updating class: ${error.detail}`);
+                }
+            } catch (error) {
+                alert('Error updating class. Please try again.');
+                console.error('Error:', error);
+            }
+        }
+
+        async function downloadZip() {
+            try {
+                const response = await fetch('/download-zip/', {
+                    method: 'GET',
+                    credentials: 'same-origin'  // This ensures cookies are sent with the request
+                });
+                
+                if (response.ok) {
+                    // Create a blob from the response and trigger download
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'organized_images.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                } else if (response.status === 401) {
+                    alert('Please log in to download the zip file');
+                    window.location.href = '/login';
+                } else {
+                    const error = await response.json();
+                    alert(`Error downloading zip: ${error.detail || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error downloading zip file. Please try again.');
+            }
         }
     </script>
 </body>

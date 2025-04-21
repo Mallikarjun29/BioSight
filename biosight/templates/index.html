@@ -32,19 +32,28 @@
                 </div>
                 <button type="submit" class="btn">Upload and Classify</button>
             </form>
+        
+            <div id="loadingOverlay" class="loading-overlay">
+                <div class="loading-spinner"></div>
+                <p>Uploading and Classifying...</p>
+            </div>
+        
             <div id="results" class="results-container"></div>
         </main>
-    </div>
 
     <script>
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData();
             const files = document.getElementById('files').files;
-            
+            const loadingOverlay = document.getElementById('loadingOverlay'); // Get the loading overlay
+
             for (let file of files) {
                 formData.append('files', file);
             }
+
+            // Show the loading overlay
+            loadingOverlay.style.display = 'flex';
 
             try {
                 const response = await fetch('/upload/', {
@@ -52,8 +61,10 @@
                     body: formData
                 });
 
+                // Hide the loading overlay
+                loadingOverlay.style.display = 'none';
+
                 if (response.ok) {
-                    // Show the result page returned by the backend
                     document.open();
                     document.write(await response.text());
                     document.close();
@@ -65,16 +76,18 @@
             } catch (error) {
                 console.error('Error:', error);
                 alert('An error occurred during upload.');
+                // Hide the loading overlay even on error
+                loadingOverlay.style.display = 'none';
             }
         });
 
-        // Logout function
+        // Logout function (remains the same)
         document.getElementById('logoutBtn')?.addEventListener('click', async () => {
             try {
                 const response = await fetch('/api/logout', {
                     method: 'POST'
                 });
-                
+
                 if (response.ok) {
                     window.location.href = '/login';
                 } else {

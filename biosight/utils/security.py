@@ -5,16 +5,8 @@ from fastapi.security import OAuth2, OAuth2PasswordBearer
 from fastapi.openapi.models import OAuthFlows as OAuthFlowsModel
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from biosight.utils.database import Database
-
-# Initialize database with users collection
-db = Database()
-db.DB_NAME = "biosight"
-db.COLLECTION_NAME = "users"  # Use users collection for authentication
-db.connect()
-
-# Import User model after database setup
-from biosight.routes.user import User
+from biosight.utils.database import db  # Fixed import path
+from ..routes.user import User
 
 # Configuration
 SECRET_KEY = "your-secret-key-change-this-in-production"  # Change this!

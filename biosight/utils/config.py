@@ -29,7 +29,7 @@ MODEL_SETTINGS = {
     'weights_file': str(MODELS_DIR / 'best_model_resnet.pth'),  # Using absolute path
     'num_classes': 10,
     'dropout_rate': 0.5,
-    'confidence_threshold': 0.7
+    'confidence_threshold': 0.5
 }
 
 # Image Preprocessing
