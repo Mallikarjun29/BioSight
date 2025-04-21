@@ -4,9 +4,8 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel, EmailStr
-# Fix the import path - use relative import from the same directory
 from .user import User, UserCreate
-from ..db import db
+from ..utils.database import db  # Fixed import path
 from ..utils.security import verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_password_hash
 
 router = APIRouter()

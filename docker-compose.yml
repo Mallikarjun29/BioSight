@@ -6,15 +6,11 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./uploads:/app/uploads
-      - ./organized_images:/app/organized_images
-      - ./models:/app/models
+      - .:/app
     depends_on:
       - mongodb
-    environment:
-      - MONGO_URI=mongodb://mongodb:27017/
-      - MONGO_DB=image_organizer
-      - MONGO_COLLECTION=image_metadata
+    networks:
+      - biosight-network
 
   mongodb:
     image: mongo:latest
@@ -22,6 +18,8 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
+    networks:
+      - biosight-network
 
   prometheus:
     image: prom/prometheus:latest
@@ -29,18 +27,34 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - biosight-network
 
   node-exporter:
     image: prom/node-exporter:latest
-    container_name: node-exporter
-    restart: unless-stopped
     ports:
       - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - biosight-network
+
+networks:
+  biosight-network:
+    driver: bridge
 
 volumes:
   mongodb_data:
+  prometheus_data:

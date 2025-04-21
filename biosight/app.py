@@ -8,6 +8,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 import torch
 
 
@@ -16,7 +17,7 @@ try:
     from biosight.utils.config import UPLOAD_FOLDER, MODEL_SETTINGS
     from biosight.utils.constants import STATUS_MESSAGES
     from biosight.utils.model_loader import load_model as load_model_from_utils
-    from biosight.utils.database import db
+    from biosight.utils.database import Database, db  # Updated import
     from biosight.utils.file_operations import (
         allowed_file, clear_organized_folder, save_upload_file,
         organize_file, create_zip_archive
@@ -39,6 +40,15 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Configure static files and templates with absolute paths
 app.mount("/uploads", StaticFiles(directory=UPLOAD_FOLDER), name="uploads")
