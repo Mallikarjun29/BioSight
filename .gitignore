@@ -3,3 +3,7 @@ models/
 __pycache__/
 inaturalist_12K/
 drift_models/
+drifted_blur_images/
+uploads/
+organized_images/
+organized_images.zip
