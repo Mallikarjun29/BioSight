@@ -15,6 +15,11 @@ import sys
 from pathlib import Path
 import json
 import joblib
+import datetime  # Import the datetime module
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Add model_building_pipeline to path if not already there
 model_building_path = Path(__file__).parent.parent / "model_building_pipeline"
@@ -251,3 +256,19 @@ if __name__ == "__main__":
         
         # Train the model
         train_model(model, train_loader, val_loader, args)
+        
+        # Create models directory if it doesn't exist
+        models_dir = "models"
+        os.makedirs(models_dir, exist_ok=True)
+        
+        # Generate a versioned model name
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_filename = f"best_model_resnet_{timestamp}.pth"
+        model_path = os.path.join(models_dir, model_filename)
+        
+        # Save the model
+        torch.save(model.state_dict(), model_path)
+        logger.info(f"Model saved to {model_path}")
+        
+        # Log the model as an artifact to MLflow
+        mlflow.log_artifact(model_path)

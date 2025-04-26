@@ -11,7 +11,7 @@ stages:
       nfiles: 12002
     - path: drift_check_report.json
       hash: md5
-      md5: ca1b5ebd99610992d96d105c028ed64c
+      md5: 2a9769d8ec3e2dfad8ba94a64af19df4
       size: 103
     - path: prepare_retrain_data.py
       hash: md5
@@ -26,12 +26,12 @@ stages:
     outs:
     - path: prepared_data_stats.json
       hash: md5
-      md5: 25c4c9747291b6631d683a210ad02cc1
-      size: 174
+      md5: 840ed221ea560c1e6bdff1ada6067169
+      size: 175
     - path: prepared_datasets.pkl
       hash: md5
-      md5: 1abb280781186a2a9d2268441225b3a8
-      size: 2824139
+      md5: 3889881adc5b48b487f0d799e6edf65f
+      size: 7643595
   check_drift:
     cmd: "python ../drift_pipeline/check_drift_batch.py --models-dir ../drift_pipeline/drift_models\n"
     deps:
@@ -58,7 +58,7 @@ stages:
     outs:
     - path: drift_check_report.json
       hash: md5
-      md5: ca1b5ebd99610992d96d105c028ed64c
+      md5: 2a9769d8ec3e2dfad8ba94a64af19df4
       size: 103
   train:
     cmd: "python -m retrain --load-datasets prepared_datasets.pkl --epochs 1 --learning-rate
@@ -66,16 +66,16 @@ stages:
     deps:
     - path: prepared_data_stats.json
       hash: md5
-      md5: 25c4c9747291b6631d683a210ad02cc1
-      size: 174
+      md5: 840ed221ea560c1e6bdff1ada6067169
+      size: 175
     - path: prepared_datasets.pkl
       hash: md5
-      md5: 1abb280781186a2a9d2268441225b3a8
-      size: 2824139
+      md5: 3889881adc5b48b487f0d799e6edf65f
+      size: 7643595
     - path: retrain.py
       hash: md5
-      md5: 093d2c9c82efc39fcf5cd79d4e5d7c52
-      size: 9549
+      md5: ea1c4ee8a27084a616466d93a5b1cf2f
+      size: 10360
     params:
       params.yaml:
         dropout_rate: 0.5
@@ -84,30 +84,36 @@ stages:
         learning_rate: 0.001
         mlflow_experiment_name: resnet_drift_retraining
     outs:
-    - path: best_model_resnet.pth
+    - path: models
       hash: md5
-      md5: 7220ce2ac4693e8b13bf9a34f3599c51
-      size: 98573930
+      md5: 1c7dd49281eb703a6d20d95f090c8c4d.dir
+      size: 295737822
+      nfiles: 3
   evaluate:
-    cmd: "python -m test_model --model-path best_model_resnet.pth --load-datasets
-      prepared_datasets.pkl --num-classes 10 --dropout-rate 0.5 --experiment-name
-      resnet_drift_retraining_eval $([[ \"true\" = \"true\" ]] && echo \"--update-db-status\"\
-      \ || echo \"\")\n"
+    cmd: "python -m test_model --load-datasets prepared_datasets.pkl --num-classes
+      10 --dropout-rate 0.5 --experiment-name resnet_drift_retraining_eval $([[ \"\
+      true\" = \"true\" ]] && echo \"--update-db-status\" || echo \"\")\n"
     deps:
-    - path: best_model_resnet.pth
+    - path: models
       hash: md5
-      md5: 7220ce2ac4693e8b13bf9a34f3599c51
-      size: 98573930
+      md5: 1c7dd49281eb703a6d20d95f090c8c4d.dir
+      size: 295737822
+      nfiles: 3
     - path: prepared_datasets.pkl
       hash: md5
-      md5: 1abb280781186a2a9d2268441225b3a8
-      size: 2824139
+      md5: 3889881adc5b48b487f0d799e6edf65f
+      size: 7643595
     - path: test_model.py
       hash: md5
-      md5: 537797949362926f4e14f3bb1f0e8136
-      size: 9896
+      md5: dce465288def6cfb61efa19f759c637a
+      size: 11543
     params:
       params.yaml:
         dropout_rate: 0.5
         mlflow_experiment_name: resnet_drift_retraining
         update_db_status: true
+    outs:
+    - path: test_results.json
+      hash: md5
+      md5: 53f22b32552bfb877a471fe0e8e8847b
+      size: 4048

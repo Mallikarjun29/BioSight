@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix, precision_recall_fscore_support
 from torch.utils.data import DataLoader
-
+import glob
 # Import MappedDataset from prepare_retrain_data
 from prepare_retrain_data import MappedDataset
 
@@ -202,6 +202,17 @@ def log_metrics_to_mlflow(metrics, class_names=None):
         plt.close(fig)
 
 
+def get_latest_model(model_dir="models"):
+    """Finds the most recent model in the specified directory."""
+    model_files = glob.glob(os.path.join(model_dir, "best_model_resnet_*.pth"))
+    if not model_files:
+        return None  # Or raise an exception if no models exist
+
+    # Sort by modification time (most recent first)
+    latest_model = max(model_files, key=os.path.getmtime)
+    return latest_model
+
+
 def main():
     """Main function to test the model."""
     args = parse_args()
@@ -216,7 +227,6 @@ def main():
     with mlflow.start_run():
         # Log parameters
         mlflow.log_params({
-            'model_path': args.model_path,
             'num_classes': args.num_classes,
             'dropout_rate': args.dropout_rate
         })
@@ -246,17 +256,24 @@ def main():
             logger.error("No dataset provided. Use --load-datasets to specify a dataset.")
             return
         
+        # Dynamically determine the model path
+        model_path = get_latest_model()
+        if not model_path:
+            logger.error("No models found in the 'models' directory.")
+            return
+        logger.info(f"Using model: {model_path}")
+        
         # Initialize and load model
         model = ResNetModel(
             num_classes=args.num_classes,
             dropout_rate=args.dropout_rate
         )
         
-        if os.path.exists(args.model_path):
-            model.load_state_dict(torch.load(args.model_path, map_location=device))
-            logger.info(f"Model weights loaded from {args.model_path}")
+        if os.path.exists(model_path):
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            logger.info(f"Model weights loaded from {model_path}")
         else:
-            logger.error(f"Model weights not found at {args.model_path}")
+            logger.error(f"Model weights not found at {model_path}")
             return
         
         model = model.to(device)
@@ -281,13 +298,13 @@ def main():
         logger.info(f"Test Recall: {metrics['recall']:.4f}")
         logger.info(f"Test F1 Score: {metrics['f1']:.4f}")
         logger.info("="*50)
-
+        
         # Output results to JSON file
         output_file = "test_results.json"
         with open(output_file, 'w') as f:
             json.dump(metrics, f, indent=4)  # Dump metrics to JSON
         logger.info(f"Saved test results to {output_file}")
-        mlflow.log_artifact(output_file)
+        mlflow.log_artifact(output_file)  # Log the JSON file as an artifact
 
         # Update database if requested
         if args.update_db_status:
@@ -296,6 +313,19 @@ def main():
             logger.info(f"Updated {updated_count} images in the database")
             mlflow.log_param("images_marked_as_used", updated_count)
 
+
+# Add argument for tracking URI
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Test a PyTorch model")
+    parser.add_argument('--load-datasets', type=str, help='Path to the test dataset pickle file')
+    parser.add_argument('--num-classes', type=int, default=10, help='Number of classes in the dataset')
+    parser.add_argument('--dropout-rate', type=float, default=0.5, help='Dropout rate used in the model')
+    parser.add_argument('--experiment-name', type=str, default='resnet_drift_retraining_eval', help='MLflow experiment name')
+    parser.add_argument('--batch-size', type=int, default=32, help='Batch size for testing')
+    parser.add_argument('--update-db-status', action='store_true', help='Update database to mark drifted images as used in training')
+    parser.add_argument('--tracking-uri', type=str, default=None, help='MLflow tracking URI')  # Add tracking URI argument
+    return parser.parse_args()
 
 if __name__ == "__main__":
     main()

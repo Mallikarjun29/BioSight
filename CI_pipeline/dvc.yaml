@@ -60,13 +60,14 @@ stages:
       - dropout_rate
       - mlflow_experiment_name
     outs:
-      - best_model_resnet.pth
+      - models: # Track the entire models directory
+          cache: true
+          persist: true
     frozen: false
 
   evaluate:
     cmd: >
       python -m test_model
-      --model-path best_model_resnet.pth
       --load-datasets prepared_datasets.pkl
       --num-classes 10
       --dropout-rate ${dropout_rate}
@@ -75,8 +76,11 @@ stages:
     deps:
       - test_model.py
       - prepared_datasets.pkl
-      - best_model_resnet.pth
+      - models # Depend on the entire models directory
     params:
       - dropout_rate
       - mlflow_experiment_name
       - update_db_status
+    outs:
+      - test_results.json:
+          cache: false
