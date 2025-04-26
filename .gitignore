@@ -9,3 +9,4 @@ organized_images/
 organized_images.zip
 best_model_resnet.pth
 mlruns/
+prepared_datasets.pkl

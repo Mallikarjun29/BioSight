@@ -107,12 +107,17 @@ class DriftChecker:
         try:
             # Get entries from DB
             image_entries = list(self.db.collection.find(
-                {'drift_checked_at': {'$exists': False}},
-                {'original_filename': 1, 'upload_path': 1}
+                {
+                    'drift_checked_at': {'$exists': False},
+                    'used_in_training': {'$ne': True},  # Exclude images used in training
+                    'predicted_class': {'$ne': 'unknown'} 
+                },
+                {'original_filename': 1, 'upload_path': 1}  # Include upload_path
             ).sort('timestamp', -1).limit(limit))
 
             if not image_entries:
                 logger.info("No new images found in database to check for drift.")
+                self.create_empty_report(output_report)  # Create empty report and return
                 return
 
             # Create dataset
@@ -124,6 +129,7 @@ class DriftChecker:
             
             if len(dataset) == 0:
                 logger.info("No valid image files found corresponding to database entries.")
+                self.create_empty_report(output_report)  # Create empty report and return
                 return
 
             # Create DataLoader
@@ -161,6 +167,11 @@ class DriftChecker:
                          logger.warning("Skipping batch with 0 features.")
                          continue
 
+                    # Check if the batch size is 1
+                    if features.shape[0] <= 1:
+                        logger.warning(f"Skipping batch with {features.shape[0]} features (MMD requires at least 2).")
+                        continue
+
                     predictions = self.drift_detector.predict(features)
                     
                     # Extract results
@@ -175,7 +186,7 @@ class DriftChecker:
                     for filename in filenames:
                         self.db.update_drift_status(
                             filename=filename,
-                            drift_detected=drift_detected # Apply batch result to all images in batch
+                            drift_detected=drift_detected
                         )
                         
                         processed_count += 1
@@ -203,6 +214,19 @@ class DriftChecker:
             logger.error(f"Error during batch processing: {e}", exc_info=True)
         finally:
             self.db.close()
+
+    def create_empty_report(self, output_report):
+        """Creates an empty drift check report."""
+        report = {
+            "timestamp": datetime.now().isoformat(),
+            "images_processed": 0,
+            "drift_detected_count": 0,
+        }
+        if output_report:
+            import json
+            with open(output_report, 'w') as f:
+                json.dump(report, f, indent=2)
+            logger.info(f"Saved empty drift check report to {output_report}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Check drift in recent images')

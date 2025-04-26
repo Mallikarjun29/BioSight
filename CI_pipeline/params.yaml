@@ -14,4 +14,4 @@ dropout_rate: 0.5
 mlflow_experiment_name: resnet_drift_retraining
 
 # Database update flag
-update_db_status: false
+update_db_status: true

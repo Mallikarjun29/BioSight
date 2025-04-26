@@ -23,6 +23,9 @@ import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix, precision_recall_fscore_support
 from torch.utils.data import DataLoader
 
+# Import MappedDataset from prepare_retrain_data
+from prepare_retrain_data import MappedDataset
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,13 +34,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Add required paths
-model_building_path = Path(__file__).parent.parent / "model_building_pipeline"
-drift_pipeline_path = Path(__file__).parent.parent / "drift_pipeline"
+import sys
+from pathlib import Path
 
-for p in [model_building_path, drift_pipeline_path]:
-    if str(p) not in sys.path:
-        sys.path.append(str(p))
+# Add the parent directory to the path
+parent_dir = Path(__file__).parent.parent
+sys.path.append(str(parent_dir))
 
 # Import required modules
 from drift_pipeline.database import DriftDatabase
@@ -148,7 +150,7 @@ def evaluate_model(model, test_loader, device, class_names=None):
         'recall': recall,
         'f1': f1,
         'classification_report': report,
-        'confusion_matrix': conf_matrix
+        'confusion_matrix': conf_matrix.tolist() 
     }
 
 
@@ -226,9 +228,9 @@ def main():
         
         # Load datasets
         if args.load_datasets:
-            import pickle
+            import joblib  # Import joblib
             with open(args.load_datasets, 'rb') as f:
-                datasets = pickle.load(f)
+                datasets = joblib.load(f)  # Use joblib.load
             
             # Create test loader from saved dataset
             test_dataset = datasets['test']
@@ -279,7 +281,14 @@ def main():
         logger.info(f"Test Recall: {metrics['recall']:.4f}")
         logger.info(f"Test F1 Score: {metrics['f1']:.4f}")
         logger.info("="*50)
-        
+
+        # Output results to JSON file
+        output_file = "test_results.json"
+        with open(output_file, 'w') as f:
+            json.dump(metrics, f, indent=4)  # Dump metrics to JSON
+        logger.info(f"Saved test results to {output_file}")
+        mlflow.log_artifact(output_file)
+
         # Update database if requested
         if args.update_db_status:
             logger.info("Updating database to mark drifted images as used in training...")
