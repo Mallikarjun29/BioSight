@@ -9,6 +9,8 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
+from datetime import datetime
+import argparse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -55,19 +57,20 @@ def collate_fn(batch):
     return images, filenames
 
 class DriftChecker:
-    def __init__(self):
-        # Disable gradients globally for inference
-        torch.set_grad_enabled(False)
+    """Class to check for drift in images from database"""
+    
+    def __init__(self, models_dir='drift_models'):
+        """Initialize the drift checker with models and database connection"""
+        self.db = DriftDatabase()
+        if not self.db.connect():
+            raise RuntimeError("Failed to connect to database")
         
-        # Load models using the updated loader
-        self.feature_extractor, self.drift_detector, self.device = load_drift_models()
+        self.feature_extractor, self.drift_detector, self.device = load_drift_models(models_dir)
         logger.info(f"Using device: {self.device}")
         
         # Ensure feature extractor is on the correct device and in eval mode
         self.feature_extractor = self.feature_extractor.to(self.device)
         self.feature_extractor.eval()
-        
-        self.db = DriftDatabase()
 
         # Set up image transformation (should match training)
         self.transform = transforms.Compose([
@@ -99,12 +102,8 @@ class DriftChecker:
 
     # process_image method is no longer needed as we use batch processing
 
-    def check_recent_images(self, limit=1000):
+    def check_recent_images(self, limit=1000, output_report="drift_check_report.json"):
         """Check drift on recent images from database using DataLoader and alibi-detect"""
-        if not self.db.connect():
-            logger.error("Failed to connect to database")
-            return
-        
         try:
             # Get entries from DB
             image_entries = list(self.db.collection.find(
@@ -186,11 +185,36 @@ class DriftChecker:
             logger.info(f"Completed processing {processed_count} images")
             logger.info(f"Total images marked with drift: {drift_detected_count}") # Note: This counts images, not batches
 
+            # Create a summary report
+            report = {
+                "timestamp": datetime.now().isoformat(),
+                "images_processed": processed_count,
+                "drift_detected_count": drift_detected_count,
+            }
+            
+            # Save as JSON for DVC to track
+            if output_report:
+                import json
+                with open(output_report, 'w') as f:
+                    json.dump(report, f, indent=2)
+                logger.info(f"Saved drift check report to {output_report}")
+                
         except Exception as e:
             logger.error(f"Error during batch processing: {e}", exc_info=True)
         finally:
             self.db.close()
 
 if __name__ == "__main__":
-    checker = DriftChecker()
-    checker.check_recent_images(limit=1000)
+    parser = argparse.ArgumentParser(description='Check drift in recent images')
+    parser.add_argument('--limit', type=int, default=1000, 
+                      help='Maximum number of images to check')
+    parser.add_argument('--output-report', type=str, default='drift_check_report.json',
+                      help='Path to save the drift check report (for DVC tracking)')
+    parser.add_argument('--models-dir', type=str, default='drift_models',
+                      help='Directory containing drift detection models')
+    
+    args = parser.parse_args()
+    
+    # Pass the models_dir to the DriftChecker
+    checker = DriftChecker(models_dir=args.models_dir)
+    checker.check_recent_images(limit=args.limit, output_report=args.output_report)

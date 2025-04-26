@@ -1,24 +1,44 @@
 stages:
+  check_drift:
+    cmd: >
+      python ../drift_pipeline/check_drift_batch.py
+      --models-dir ../drift_pipeline/drift_models
+    deps:
+      - ../drift_pipeline/check_drift_batch.py
+      - ../drift_pipeline/load_drift_detector.py
+      - ../drift_pipeline/database.py
+      - ../drift_pipeline/drift_models/drift_detector.joblib
+      - ../drift_pipeline/drift_models/feature_extractor.pth
+    outs:
+      - drift_check_report.json:
+          cache: false
+    always_changed: true  # Run this every time because we always want to check for new drifted images
+
   prepare_data:
     cmd: >
       python -m prepare_retrain_data 
       --data-dir ${data_dir} 
-      --max-drifted ${max_drifted} 
+      --max-drifted ${max_drifted}
+      --min-drifted ${min_drifted}
       --batch-size ${batch_size} 
       --generate-stats
       --save-datasets prepared_datasets.pkl
     deps:
       - prepare_retrain_data.py
-      - ${data_dir:../inaturalist_12K}
+      - ${data_dir}
+      - drift_check_report.json  # Add dependency on the drift check output
     params:
       - data_dir
       - max_drifted
+      - min_drifted
       - batch_size
     outs:
       - prepared_data_stats.json:
           cache: false
       - prepared_datasets.pkl:
           cache: true
+          persist: true
+    always_changed: false
 
   train:
     cmd: >
@@ -32,6 +52,7 @@ stages:
     deps:
       - retrain.py
       - prepared_datasets.pkl
+      - prepared_data_stats.json  # Also depend on the stats file to check if training should be skipped
     params:
       - epochs
       - learning_rate
@@ -40,6 +61,7 @@ stages:
       - mlflow_experiment_name
     outs:
       - best_model_resnet.pth
+    frozen: false
 
   evaluate:
     cmd: >
@@ -49,6 +71,7 @@ stages:
       --num-classes 10
       --dropout-rate ${dropout_rate}
       --experiment-name ${mlflow_experiment_name}_eval
+      $([[ "${update_db_status}" = "true" ]] && echo "--update-db-status" || echo "")
     deps:
       - test_model.py
       - prepared_datasets.pkl
@@ -56,3 +79,4 @@ stages:
     params:
       - dropout_rate
       - mlflow_experiment_name
+      - update_db_status

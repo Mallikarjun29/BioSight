@@ -19,7 +19,7 @@ from torchvision import transforms
 from PIL import Image
 from tqdm import tqdm
 from datetime import datetime
-import pickle
+import joblib  # Use joblib instead of pickle
 
 from drift_pipeline.database import DriftDatabase
 from drift_pipeline.prepare_data import DataPreparation
@@ -97,6 +97,18 @@ def convert_docker_path_to_local(docker_path):
         return LOCAL_PATH_PREFIX / relative_path
     except ValueError:
         return docker_path  # Return original if not relative to prefix
+
+
+# Move this class outside the function to make it picklable
+class MappedDataset(Dataset):
+    def __init__(self, entries):
+        self.entries = entries
+    
+    def __len__(self):
+        return len(self.entries)
+    
+    def __getitem__(self, idx):
+        return self.entries[idx]
 
 
 def prepare_retraining_data(original_data_dir, max_drifted_images=100, batch_size=32, num_workers=4):
@@ -193,17 +205,7 @@ def prepare_retraining_data(original_data_dir, max_drifted_images=100, batch_siz
         else:
             logger.warning(f"Class '{class_name}' not found in original dataset. Skipping.")
     
-    # Create a simple dataset from mapped entries
-    class MappedDataset(Dataset):
-        def __init__(self, entries):
-            self.entries = entries
-        
-        def __len__(self):
-            return len(self.entries)
-        
-        def __getitem__(self, idx):
-            return self.entries[idx]
-    
+    # Create a mapped dataset using the globally defined class
     mapped_drifted_dataset = MappedDataset(mapped_entries)
     
     # 5. Combine datasets for training
@@ -220,36 +222,12 @@ def prepare_retraining_data(original_data_dir, max_drifted_images=100, batch_siz
     )
     
     # 7. Update training status in database
-    update_training_status(drifted_image_entries)
+    # update_training_status(drifted_image_entries)
     
     logger.info(f"Created combined dataset with {len(combined_dataset)} images "
                 f"({original_train_size} original + {len(mapped_drifted_dataset)} drifted)")
     
     return combined_train_loader, val_loader, test_loader, original_train_size
-
-
-def update_training_status(drifted_images):
-    """Mark drifted images as used in training."""
-    db = DriftDatabase()
-    
-    try:
-        if not db.connect():
-            logger.error("Failed to connect to the database.")
-            return False
-        
-        for image in drifted_images:
-            filename = image.get('original_filename')
-            if filename:
-                db.collection.update_one(
-                    {'original_filename': filename},
-                    {'$set': {'used_in_training': True}}
-                )
-        
-        logger.info(f"Updated training status for {len(drifted_images)} drifted images")
-    except Exception as e:
-        logger.error(f"Error updating training status: {e}")
-    finally:
-        db.close()
 
 
 def generate_dataset_stats(train_loader, val_loader, test_loader, drifted_count, output_file='prepared_data_stats.json'):
@@ -295,6 +273,8 @@ def main():
                       help='Generate dataset statistics JSON file')
     parser.add_argument('--save-datasets', type=str,
                       help='Save prepared datasets to pickle file')
+    parser.add_argument('--min-drifted', type=int, default=100,
+                      help='Minimum number of drifted images required for retraining')
     
     args = parser.parse_args()
     
@@ -306,9 +286,42 @@ def main():
         num_workers=args.num_workers
     )
     
+    # Check if we have enough drifted images
     if train_loader:
-        # Print information about the dataset
+        drifted_count = len(train_loader.dataset) - original_train_size
+        
+        if drifted_count < args.min_drifted:
+            logger.warning(f"Not enough drifted images found. Found {drifted_count}, but {args.min_drifted} required.")
+            logger.info("Skipping model retraining due to insufficient drifted data.")
+            
+            if args.generate_stats:
+                generate_dataset_stats(
+                    train_loader, 
+                    val_loader, 
+                    test_loader, 
+                    drifted_count=drifted_count,
+                    output_file='prepared_data_stats.json'
+                )
+            
+            if args.save_datasets:
+                datasets = {
+                    'train': train_loader.dataset,
+                    'val': val_loader.dataset,
+                    'test': test_loader.dataset,
+                    'original_train_size': original_train_size
+                }
+                
+                joblib.dump(datasets, args.save_datasets)  # Use joblib.dump instead of pickle.dump
+                
+                logger.info(f"Saved prepared datasets to {args.save_datasets}")
+            
+            # Exit with code 0 instead of 77 - this allows DVC to consider this stage successful
+            # but we'll add logic to skip the next stages based on content of prepared_data_stats.json
+            sys.exit(77)
+        
+        # Otherwise continue with normal process
         print(f"\nCombined training dataset size: {len(train_loader.dataset)} images")
+        print(f"Drifted images included: {drifted_count}")
         print(f"Validation dataset size: {len(val_loader.dataset)} images")
         print(f"Test dataset size: {len(test_loader.dataset)} images")
         
@@ -318,7 +331,7 @@ def main():
                 train_loader, 
                 val_loader, 
                 test_loader, 
-                drifted_count=len(train_loader.dataset) - original_train_size
+                drifted_count=drifted_count
             )
         
         # Save datasets if requested
@@ -330,8 +343,7 @@ def main():
                 'original_train_size': original_train_size
             }
             
-            with open(args.save_datasets, 'wb') as f:
-                pickle.dump(datasets, f)
+            joblib.dump(datasets, args.save_datasets)  # Use joblib.dump instead of pickle.dump
             
             logger.info(f"Saved prepared datasets to {args.save_datasets}")
         

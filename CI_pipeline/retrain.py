@@ -7,11 +7,14 @@ import mlflow
 import mlflow.pytorch
 import argparse
 from torch.utils.data import DataLoader
-from prepare_retrain_data import prepare_retraining_data
+# Import MappedDataset from prepare_retrain_data
+from prepare_retrain_data import prepare_retraining_data, MappedDataset
 import numpy as np
 import os
 import sys
 from pathlib import Path
+import json
+import joblib
 
 # Add model_building_pipeline to path if not already there
 model_building_path = Path(__file__).parent.parent / "model_building_pipeline"
@@ -29,30 +32,39 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description='Train ResNet model with transfer learning')
     
-    parser.add_argument('--experiment_name', type=str, default='resnet_training',
+    # Update argument names to accept both formats (with hyphen and underscore)
+    parser.add_argument('--experiment-name', '--experiment_name', dest='experiment_name',
+                        type=str, default='resnet_training',
                         help='MLflow experiment name')
-    parser.add_argument('--tracking_uri', type=str, default=None,
+    parser.add_argument('--tracking-uri', '--tracking_uri', dest='tracking_uri',
+                        type=str, default=None,
                         help='MLflow tracking URI')
     parser.add_argument('-e', '--epochs', type=int, default=10,
                         help='Number of training epochs')
-    parser.add_argument('-b', '--batch_size', type=int, default=32,
+    parser.add_argument('-b', '--batch-size', '--batch_size', dest='batch_size',
+                        type=int, default=32,
                         help='Training batch size')
-    parser.add_argument('-lr', '--learning_rate', type=float, default=0.001,
+    parser.add_argument('-lr', '--learning-rate', '--learning_rate', dest='learning_rate',
+                        type=float, default=0.001,
                         help='Learning rate')
-    parser.add_argument('--freeze_strategy', type=str, 
-                        choices=['none', 'upto_stage_1', 'upto_stage_2', 'upto_stage_3'],
+    parser.add_argument('--freeze-strategy', '--freeze_strategy', dest='freeze_strategy',
+                        type=str, choices=['none', 'upto_stage_1', 'upto_stage_2', 'upto_stage_3'],
                         default='upto_stage_3',
                         help='Layer freezing strategy')
-    parser.add_argument('--dropout_rate', type=float, default=0.5,
+    parser.add_argument('--dropout-rate', '--dropout_rate', dest='dropout_rate',
+                        type=float, default=0.5,
                         help='Dropout rate')
-    parser.add_argument('--data-dir', type=str, default='../inaturalist_12K',
+    parser.add_argument('--data-dir', '--data_dir', dest='data_dir',
+                        type=str, default='../inaturalist_12K',
                         help='Path to original dataset directory')
-    parser.add_argument('--max-drifted', type=int, default=100,
+    parser.add_argument('--max-drifted', '--max_drifted', dest='max_drifted',
+                        type=int, default=100,
                         help='Maximum number of drifted images to include')
-    parser.add_argument('--num-workers', type=int, default=4,
+    parser.add_argument('--num-workers', '--num_workers', dest='num_workers',
+                        type=int, default=4,
                         help='Number of worker processes for data loading')
-    parser.add_argument('--load-datasets', type=str,
-                      help='Load prepared datasets from pickle file')
+    parser.add_argument('--load-datasets', '--load_datasets', dest='load_datasets',
+                        type=str, help='Load prepared datasets from pickle file')
     
     return parser.parse_args()
 
@@ -171,9 +183,8 @@ if __name__ == "__main__":
         
         # Load datasets if path is provided
         if args.load_datasets:
-            import pickle
-            with open(args.load_datasets, 'rb') as f:
-                datasets = pickle.load(f)
+            import joblib  # Use joblib
+            datasets = joblib.load(args.load_datasets)
             
             # Create data loaders from saved datasets
             train_dataset = datasets['train']
