@@ -21,8 +21,6 @@ def parse_args():
     
     parser.add_argument('--experiment_name', type=str, default='resnet_training',
                         help='MLflow experiment name')
-    parser.add_argument('--tracking_uri', type=str, default=None,
-                        help='MLflow tracking URI')
     parser.add_argument('-e', '--epochs', type=int, default=10,
                         help='Number of training epochs')
     parser.add_argument('-b', '--batch_size', type=int, default=32,
@@ -137,26 +135,27 @@ def train_model(model, train_loader, val_loader, args):
 
 if __name__ == "__main__":
     args = parse_args()
-    mlflow.set_tracking_uri(args.tracking_uri)
-    mlflow.start_run()
-    mlflow.set_experiment(args.experiment_name)
-    
-    data_directory = "../inaturalist_12K"
-    data_preparation = DataPreparation(data_directory, batch_size=args.batch_size)
-    train_loader, val_loader, test_loader = data_preparation.get_data_loaders()
-    
-    freeze_stage = None
-    if args.freeze_strategy == 'upto_stage_1':
-        freeze_stage = 1
-    elif args.freeze_strategy == 'upto_stage_2':
-        freeze_stage = 2
-    elif args.freeze_strategy == 'upto_stage_3':
-        freeze_stage = 3
-    
-    model = ResNetModel(
-        num_classes=10,
-        dropout_rate=args.dropout_rate,
-        freeze_upto_stage=freeze_stage
-    )
-    
-    train_model(model, train_loader, val_loader, args)
+    mlflow.set_experiment(args.experiment_name)  # Set experiment BEFORE start_run
+    with mlflow.start_run(): # Start the run
+        # Log parameters (optional, but good practice)
+        mlflow.log_params(vars(args))
+        
+        data_directory = "../inaturalist_12K"
+        data_preparation = DataPreparation(data_directory, batch_size=args.batch_size)
+        train_loader, val_loader, test_loader = data_preparation.get_data_loaders()
+        
+        freeze_stage = None
+        if args.freeze_strategy == 'upto_stage_1':
+            freeze_stage = 1
+        elif args.freeze_strategy == 'upto_stage_2':
+            freeze_stage = 2
+        elif args.freeze_strategy == 'upto_stage_3':
+            freeze_stage = 3
+        
+        model = ResNetModel(
+            num_classes=10,
+            dropout_rate=args.dropout_rate,
+            freeze_upto_stage=freeze_stage
+        )
+        
+        train_model(model, train_loader, val_loader, args)
