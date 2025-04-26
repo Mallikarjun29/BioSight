@@ -57,8 +57,9 @@ def train_model(model, train_loader, val_loader, config):
     mlflow.pytorch.autolog()
 
     best_val_acc = 0.0
+    num_epochs = int(config['epochs'])
 
-    for epoch in range(config['epochs']):
+    for epoch in range(num_epochs):
         # Training phase
         model.train()  # Make sure model is in training mode
         running_loss = 0.0
@@ -194,7 +195,7 @@ if __name__ == "__main__":
             fn=sweep_train(),
             space=search_space,
             algo=tpe.suggest,
-            max_evals=15,  # Same number of trials as in the wandb version
+            max_evals=10,  # Same number of trials as in the wandb version
             trials=trials
         )
         

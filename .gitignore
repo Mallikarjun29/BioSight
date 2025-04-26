@@ -7,3 +7,5 @@ drifted_blur_images/
 uploads/
 organized_images/
 organized_images.zip
+best_model_resnet.pth
+mlruns/
