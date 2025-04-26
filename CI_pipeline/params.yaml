@@ -1,0 +1,13 @@
+# Dataset parameters
+data_dir: ../inaturalist_12K
+max_drifted: 100
+batch_size: 32
+
+# Training parameters
+epochs: 2
+learning_rate: 0.001
+freeze_strategy: none
+dropout_rate: 0.5
+
+# Experiment tracking
+mlflow_experiment_name: resnet_drift_retraining
