@@ -20,6 +20,7 @@ import mlflow
 import mlflow.pytorch
 import io
 import json
+from torch.utils.data import DataLoader
 
 # Add drift_pipeline to path if not already there
 drift_pipeline_path = Path(__file__).parent.parent / "drift_pipeline"
@@ -65,6 +66,8 @@ def parse_args():
                         help='Number of classes in the dataset')
     parser.add_argument('--dropout-rate', type=float, default=0.5,
                         help='Dropout rate used in the model')
+    parser.add_argument('--load-datasets', type=str,
+                      help='Load prepared datasets from pickle file')
     
     return parser.parse_args()
 
@@ -263,13 +266,29 @@ def main():
         print(f"Using device: {device}")
         mlflow.log_param('device', device.type)
         
-        # Get data loaders from the same function used in training
-        _, _, test_loader = prepare_retraining_data(
-            original_data_dir=args.data_dir,
-            max_drifted_images=args.max_drifted,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers
-        )
+        # Load datasets if path is provided
+        if args.load_datasets:
+            import pickle
+            with open(args.load_datasets, 'rb') as f:
+                datasets = pickle.load(f)
+            
+            # Create test loader from saved dataset
+            test_dataset = datasets['test']
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=args.batch_size if hasattr(args, 'batch_size') else 32,
+                shuffle=False,
+                num_workers=args.num_workers if hasattr(args, 'num_workers') else 4,
+                pin_memory=True
+            )
+        else:
+            # Original code for loading test data
+            _, _, test_loader = prepare_retraining_data(
+                original_data_dir=args.data_dir,
+                max_drifted_images=args.max_drifted,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers
+            )
         
         # Initialize the model with the same architecture used during training
         model = ResNetModel(

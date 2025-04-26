@@ -6,7 +6,8 @@ import torch.optim as optim
 import mlflow
 import mlflow.pytorch
 import argparse
-from prepare_retrain_data import prepare_retraining_data  # Import the new data loading function
+from torch.utils.data import DataLoader
+from prepare_retrain_data import prepare_retraining_data
 import numpy as np
 import os
 import sys
@@ -50,6 +51,8 @@ def parse_args():
                         help='Maximum number of drifted images to include')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of worker processes for data loading')
+    parser.add_argument('--load-datasets', type=str,
+                      help='Load prepared datasets from pickle file')
     
     return parser.parse_args()
 
@@ -153,30 +156,87 @@ def train_model(model, train_loader, val_loader, args):
 
 if __name__ == "__main__":
     args = parse_args()
-    mlflow.set_tracking_uri(args.tracking_uri)
-    mlflow.start_run()
+    
+    # Set MLflow tracking URI if provided
+    if args.tracking_uri:
+        mlflow.set_tracking_uri(args.tracking_uri)
+    
+    # Set experiment BEFORE start_run (same as train.py)
     mlflow.set_experiment(args.experiment_name)
     
-    # Use the prepare_retraining_data function instead of DataPreparation
-    train_loader, val_loader, test_loader = prepare_retraining_data(
-        original_data_dir=args.data_dir,
-        max_drifted_images=args.max_drifted,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers
-    )
-    
-    freeze_stage = None
-    if args.freeze_strategy == 'upto_stage_1':
-        freeze_stage = 1
-    elif args.freeze_strategy == 'upto_stage_2':
-        freeze_stage = 2
-    elif args.freeze_strategy == 'upto_stage_3':
-        freeze_stage = 3
-    
-    model = ResNetModel(
-        num_classes=10,
-        dropout_rate=args.dropout_rate,
-        freeze_upto_stage=freeze_stage
-    )
-    
-    train_model(model, train_loader, val_loader, args)
+    # Using the context manager pattern for MLflow run
+    with mlflow.start_run():
+        # Log parameters (same as train.py)
+        mlflow.log_params(vars(args))
+        
+        # Load datasets if path is provided
+        if args.load_datasets:
+            import pickle
+            with open(args.load_datasets, 'rb') as f:
+                datasets = pickle.load(f)
+            
+            # Create data loaders from saved datasets
+            train_dataset = datasets['train']
+            val_dataset = datasets['val']
+            test_dataset = datasets['test']
+            original_train_size = datasets['original_train_size']
+            
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=args.batch_size,
+                shuffle=True,
+                num_workers=args.num_workers,
+                pin_memory=True
+            )
+            
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=args.num_workers,
+                pin_memory=True
+            )
+            
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=args.num_workers,
+                pin_memory=True
+            )
+        else:
+            # Original code for preparing data
+            train_loader, val_loader, test_loader, original_train_size = prepare_retraining_data(
+                original_data_dir=args.data_dir,
+                max_drifted_images=args.max_drifted,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers
+            )
+        
+        # Log dataset composition information to MLflow
+        mlflow.log_params({
+            'original_train_size': original_train_size,
+            'total_train_size': len(train_loader.dataset),
+            'drifted_images_count': len(train_loader.dataset) - original_train_size,
+            'val_size': len(val_loader.dataset),
+            'test_size': len(test_loader.dataset)
+        })
+        
+        # Setup model freezing
+        freeze_stage = None
+        if args.freeze_strategy == 'upto_stage_1':
+            freeze_stage = 1
+        elif args.freeze_strategy == 'upto_stage_2':
+            freeze_stage = 2
+        elif args.freeze_strategy == 'upto_stage_3':
+            freeze_stage = 3
+        
+        # Create the model
+        model = ResNetModel(
+            num_classes=10,
+            dropout_rate=args.dropout_rate,
+            freeze_upto_stage=freeze_stage
+        )
+        
+        # Train the model
+        train_model(model, train_loader, val_loader, args)

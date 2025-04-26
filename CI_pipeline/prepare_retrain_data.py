@@ -18,6 +18,8 @@ from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from torchvision import transforms
 from PIL import Image
 from tqdm import tqdm
+from datetime import datetime
+import pickle
 
 from drift_pipeline.database import DriftDatabase
 from drift_pipeline.prepare_data import DataPreparation
@@ -108,7 +110,7 @@ def prepare_retraining_data(original_data_dir, max_drifted_images=100, batch_siz
         num_workers: Number of worker processes for data loading
     
     Returns:
-        Tuple of DataLoaders (train, val, test)
+        Tuple of DataLoaders (train, val, test) and original train size
     """
     # Define image transforms
     transform = transforms.Compose([
@@ -158,10 +160,13 @@ def prepare_retraining_data(original_data_dir, max_drifted_images=100, batch_siz
     # Get original data loaders
     train_loader, val_loader, test_loader = data_prep.get_data_loaders()
     
+    # Store the original training dataset size
+    original_train_size = len(train_loader.dataset)
+    
     # If no drifted images, return original loaders
     if not drifted_image_entries:
         logger.warning("No drifted images found. Using only original dataset.")
-        return train_loader, val_loader, test_loader
+        return train_loader, val_loader, test_loader, original_train_size
     
     # 3. Create dataset for drifted images using the same approach as check_drift_batch.py
     drifted_dataset = DriftedImagesDataset(
@@ -172,7 +177,7 @@ def prepare_retraining_data(original_data_dir, max_drifted_images=100, batch_siz
     
     if len(drifted_dataset) == 0:
         logger.warning("Could not locate any drifted image files. Using only original dataset.")
-        return train_loader, val_loader, test_loader
+        return train_loader, val_loader, test_loader, original_train_size
     
     logger.info(f"Successfully located {len(drifted_dataset)} drifted image files")
     
@@ -218,9 +223,9 @@ def prepare_retraining_data(original_data_dir, max_drifted_images=100, batch_siz
     update_training_status(drifted_image_entries)
     
     logger.info(f"Created combined dataset with {len(combined_dataset)} images "
-                f"({len(original_train_dataset)} original + {len(mapped_drifted_dataset)} drifted)")
+                f"({original_train_size} original + {len(mapped_drifted_dataset)} drifted)")
     
-    return combined_train_loader, val_loader, test_loader
+    return combined_train_loader, val_loader, test_loader, original_train_size
 
 
 def update_training_status(drifted_images):
@@ -247,6 +252,34 @@ def update_training_status(drifted_images):
         db.close()
 
 
+def generate_dataset_stats(train_loader, val_loader, test_loader, drifted_count, output_file='prepared_data_stats.json'):
+    """Generate statistics about the prepared datasets.
+    
+    Args:
+        train_loader: Training data loader
+        val_loader: Validation data loader
+        test_loader: Test data loader
+        drifted_count: Number of drifted images included
+        output_file: Path to save the stats file
+    """
+    import json
+    
+    stats = {
+        'timestamp': datetime.now().isoformat(),
+        'train_size': len(train_loader.dataset),
+        'val_size': len(val_loader.dataset),
+        'test_size': len(test_loader.dataset),
+        'drifted_images_included': drifted_count,
+        'batch_size': train_loader.batch_size,
+    }
+    
+    with open(output_file, 'w') as f:
+        json.dump(stats, f, indent=4)
+    
+    logger.info(f"Dataset statistics saved to {output_file}")
+    return stats
+
+
 def main():
     """Main function to prepare retraining data."""
     parser = argparse.ArgumentParser(description='Prepare combined dataset for retraining')
@@ -258,11 +291,15 @@ def main():
                         help='Batch size for data loaders')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='Number of worker processes for data loading')
+    parser.add_argument('--generate-stats', action='store_true',
+                      help='Generate dataset statistics JSON file')
+    parser.add_argument('--save-datasets', type=str,
+                      help='Save prepared datasets to pickle file')
     
     args = parser.parse_args()
     
     # Create combined dataset and data loaders
-    train_loader, val_loader, test_loader = prepare_retraining_data(
+    train_loader, val_loader, test_loader, original_train_size = prepare_retraining_data(
         original_data_dir=args.data_dir,
         max_drifted_images=args.max_drifted,
         batch_size=args.batch_size,
@@ -274,6 +311,29 @@ def main():
         print(f"\nCombined training dataset size: {len(train_loader.dataset)} images")
         print(f"Validation dataset size: {len(val_loader.dataset)} images")
         print(f"Test dataset size: {len(test_loader.dataset)} images")
+        
+        # Generate statistics file if requested
+        if args.generate_stats:
+            generate_dataset_stats(
+                train_loader, 
+                val_loader, 
+                test_loader, 
+                drifted_count=len(train_loader.dataset) - original_train_size
+            )
+        
+        # Save datasets if requested
+        if args.save_datasets:
+            datasets = {
+                'train': train_loader.dataset,
+                'val': val_loader.dataset,
+                'test': test_loader.dataset,
+                'original_train_size': original_train_size
+            }
+            
+            with open(args.save_datasets, 'wb') as f:
+                pickle.dump(datasets, f)
+            
+            logger.info(f"Saved prepared datasets to {args.save_datasets}")
         
         # Sample a batch to verify
         for images, labels in train_loader:

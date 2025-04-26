@@ -1,22 +1,29 @@
 stages:
   prepare_data:
-    cmd: python -m prepare_retrain_data --data-dir ../inaturalist_12K --max-drifted 100 --batch-size 32
+    cmd: >
+      python -m prepare_retrain_data 
+      --data-dir ${data_dir} 
+      --max-drifted ${max_drifted} 
+      --batch-size ${batch_size} 
+      --generate-stats
+      --save-datasets prepared_datasets.pkl
     deps:
       - prepare_retrain_data.py
       - ${data_dir:../inaturalist_12K}
     params:
+      - data_dir
       - max_drifted
       - batch_size
     outs:
-      - .dvc/tmp/prepared_data_stats.json:
+      - prepared_data_stats.json:
           cache: false
+      - prepared_datasets.pkl:
+          cache: true
 
   train:
     cmd: >
       python -m retrain
-      --data-dir ${data_dir}
-      --max-drifted ${max_drifted}
-      --batch-size ${batch_size}
+      --load-datasets prepared_datasets.pkl
       --epochs ${epochs}
       --learning-rate ${learning_rate}
       --freeze-strategy ${freeze_strategy}
@@ -24,11 +31,8 @@ stages:
       --experiment-name ${mlflow_experiment_name}
     deps:
       - retrain.py
-      - prepare_retrain_data.py
+      - prepared_datasets.pkl
     params:
-      - data_dir
-      - max_drifted
-      - batch_size
       - epochs
       - learning_rate
       - freeze_strategy
@@ -41,19 +45,14 @@ stages:
     cmd: >
       python -m test_model
       --model-path best_model_resnet.pth
-      --data-dir ${data_dir}
-      --max-drifted ${max_drifted}
-      --batch-size ${batch_size}
+      --load-datasets prepared_datasets.pkl
       --num-classes 10
       --dropout-rate ${dropout_rate}
       --experiment-name ${mlflow_experiment_name}_eval
     deps:
       - test_model.py
-      - prepare_retrain_data.py
+      - prepared_datasets.pkl
       - best_model_resnet.pth
     params:
-      - data_dir
-      - max_drifted
-      - batch_size
       - dropout_rate
       - mlflow_experiment_name
