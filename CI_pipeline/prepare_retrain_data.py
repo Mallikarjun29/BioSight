@@ -21,8 +21,8 @@ from tqdm import tqdm
 from datetime import datetime
 import joblib  # Use joblib instead of pickle
 
-from drift_pipeline.database import DriftDatabase
-from drift_pipeline.prepare_data import DataPreparation
+from drift_detection.database import DriftDatabase
+from drift_detection.prepare_data import DataPreparation
 
 # Configure logging
 logging.basicConfig(

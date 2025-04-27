@@ -1,14 +1,14 @@
 stages:
   check_drift:
     cmd: >
-      python ../drift_pipeline/check_drift_batch.py
-      --models-dir ../drift_pipeline/drift_models
+      python drift_detection/check_drift_batch.py
+      --models-dir drift_detection/drift_models
     deps:
-      - ../drift_pipeline/check_drift_batch.py
-      - ../drift_pipeline/load_drift_detector.py
-      - ../drift_pipeline/database.py
-      - ../drift_pipeline/drift_models/drift_detector.joblib
-      - ../drift_pipeline/drift_models/feature_extractor.pth
+      - drift_detection/check_drift_batch.py
+      - drift_detection/load_drift_detector.py
+      - drift_detection/database.py
+      - drift_detection/drift_models/drift_detector.joblib
+      - drift_detection/drift_models/feature_extractor.pth
     outs:
       - drift_check_report.json:
           cache: false
@@ -75,7 +75,6 @@ stages:
       $([[ "${update_db_status}" = "true" ]] && echo "--update-db-status" || echo "")
     deps:
       - test_model.py
-      - prepared_datasets.pkl
       - models # Depend on the entire models directory
     params:
       - dropout_rate

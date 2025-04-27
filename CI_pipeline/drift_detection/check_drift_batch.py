@@ -85,7 +85,7 @@ class DriftChecker:
         
         # Path mapping
         self.docker_path_prefix = Path("/app/biosight")
-        self.local_path_prefix = Path(__file__).parent.parent / "client-side/biosight"
+        self.local_path_prefix = Path(__file__).parent.parent.parent / "client-side/biosight"
         
         # Batch size for inference (can be different from training)
         self.batch_size = 4

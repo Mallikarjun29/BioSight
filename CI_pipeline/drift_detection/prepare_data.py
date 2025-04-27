@@ -226,7 +226,7 @@ class DataPreparation:
 
 if __name__ == "__main__":
     """Validate dataset structure and test data loading functionality."""
-    data_directory = "inaturalist_12K"
+    data_directory = "../inaturalist_12K"
     # Use the helper class for validation checks
     dataset_validator = INaturalistDataset(data_directory)
 

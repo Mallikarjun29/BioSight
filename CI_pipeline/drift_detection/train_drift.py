@@ -52,7 +52,13 @@ if __name__ == "__main__":
     device = get_device()
     print(f"Using device: {device}")
     model = model.to(device)
-    
+    import os
+    from pathlib import Path
+
+    # Calculate the correct path relative to this script's location
+    script_location = Path(__file__).parent
+    data_directory = script_location.parent.parent / "inaturalist_12K" # Go up two levels to BioSight, then into dataset
+
     # Create feature extractor
     feature_extractor = FeatureExtractor(model, device)
     feature_extractor.eval()
@@ -60,7 +66,7 @@ if __name__ == "__main__":
     # Set up data loaders
     data_dir = "../inaturalist_12K"
     batch_size = 64
-    data_prep = DataPreparation(data_dir, batch_size=batch_size)
+    data_prep = DataPreparation(str(data_directory), batch_size=batch_size)
     train_loader, val_loader, _ = data_prep.get_data_loaders()
     
     # Collect reference features

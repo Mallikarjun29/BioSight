@@ -42,7 +42,7 @@ parent_dir = Path(__file__).parent.parent
 sys.path.append(str(parent_dir))
 
 # Import required modules
-from drift_pipeline.database import DriftDatabase
+from drift_detection.database import DriftDatabase
 from prepare_retrain_data import prepare_retraining_data
 from model_building_pipeline.model import ResNetModel
 
