@@ -7,32 +7,24 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+      # Add volumes for uploads and organized folders if they are outside the build context
+      # or if you want them to persist outside the container lifecycle more explicitly
+      # - ./uploads:/app/uploads 
+      # - ./organized:/app/organized
     depends_on:
       - mongodb
     networks:
       - biosight-network
+    # Add environment variables if needed, e.g., from a .env file
+    # env_file:
+    #   - .env
 
   mongodb:
     image: mongo:latest
     ports:
-      - "27018:27017"
+      - "27018:27017" # Mapping host 27018 to container 27017 to avoid conflicts if local mongo runs on 27017
     volumes:
       - mongodb_data:/data/db
-    networks:
-      - biosight-network
-
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
     networks:
       - biosight-network
 
@@ -50,6 +42,51 @@ services:
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     networks:
       - biosight-network
+      
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle' # Useful for reloading config without restart
+    depends_on:
+      - app # Ensure app is running for scraping
+      - node-exporter
+    networks:
+      - biosight-network
+
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000" # Default Grafana port
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Mount the provisioning configurations
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources 
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      # Mount the directory containing your dashboard JSON file(s)
+      - ./grafana/dashboards:/etc/grafana/dashboards 
+    depends_on:
+      - prometheus # Grafana will connect to Prometheus
+    networks:
+      - biosight-network
+    # Optional: Set admin user/password (defaults to admin/admin)
+    # environment:
+    #   - GF_SECURITY_ADMIN_USER=admin
+    #   - GF_SECURITY_ADMIN_PASSWORD=your_grafana_password 
+    # Optional: Disable login form and enable anonymous access for easy viewing
+    # environment:
+    #   - GF_AUTH_ANONYMOUS_ENABLED=true
+    #   - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer # Or Editor/Admin
+    #   - GF_AUTH_DISABLE_LOGIN_FORM=true
 
 networks:
   biosight-network:
@@ -58,3 +95,4 @@ networks:
 volumes:
   mongodb_data:
   prometheus_data:
+  grafana_data: # Add volume definition for Grafana

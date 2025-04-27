@@ -1,0 +1,12 @@
+# filepath: grafana/provisioning/dashboards/dashboard.yml
+apiVersion: 1
+
+providers:
+  - name: 'default' # Provider name
+    orgId: 1 # Default organization ID
+    folder: '' # Optional: Import dashboards into a specific folder in Grafana UI
+    type: file
+    disableDeletion: false # Allow deleting dashboards from Grafana UI
+    editable: true # Allow editing dashboards in Grafana UI
+    options:
+      path: /etc/grafana/dashboards # Path *inside the container* where dashboard JSONs are mounted

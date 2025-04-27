@@ -1,0 +1,10 @@
+# filepath: grafana/provisioning/datasources/datasource.yml
+apiVersion: 1
+
+datasources:
+  - name: Prometheus # Name displayed in Grafana
+    type: prometheus
+    url: http://prometheus:9090 # Use the service name 'prometheus' and its port 9090
+    access: proxy # Access Grafana backend instead of browser directly
+    isDefault: true # Make this the default data source
+    editable: true # Allow editing in Grafana UI if needed

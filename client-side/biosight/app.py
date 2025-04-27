@@ -4,13 +4,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 import time
 import logging
-from typing import Optional # Import Optional
+from typing import Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Depends, status # Import status
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Depends, status
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint # Import middleware components
+from starlette.responses import Response as StarletteResponse # Import Response for middleware
 import torch
 import shutil
 
@@ -33,7 +35,8 @@ try:
         organize_file, create_zip_archive
     )
     from biosight.utils.image_processor import ImageProcessor
-    from biosight.utils.monitoring import PREDICTION_COUNTER, PREDICTION_LATENCY, UPLOAD_COUNTER, get_metrics
+    # Import the new HTTP counter
+    from biosight.utils.monitoring import PREDICTION_COUNTER, PREDICTION_LATENCY, UPLOAD_COUNTER, HTTP_REQUESTS_TOTAL, get_metrics 
     from biosight.routes.auth import router as auth_router
     # Import both user dependency functions
     from biosight.utils.security import get_current_user, get_current_user_optional 
@@ -51,6 +54,30 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI()
+
+# --- Add Request Counting Middleware ---
+class MetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> StarletteResponse:
+        # Exclude metrics endpoint itself from being counted
+        if request.url.path != "/metrics":
+            start_time = time.time()
+            response = await call_next(request)
+            process_time = time.time() - start_time
+            
+            # Use route template if available for better grouping, otherwise use raw path
+            route_template = request.scope.get("route").path if request.scope.get("route") else request.url.path
+            
+            HTTP_REQUESTS_TOTAL.labels(method=request.method, path=route_template).inc()
+            # You could add another histogram here for request latency if desired
+            # HTTP_REQUEST_LATENCY.labels(method=request.method, path=route_template).observe(process_time)
+            
+            return response
+        else:
+            # Don't count metrics requests
+            return await call_next(request)
+
+app.add_middleware(MetricsMiddleware)
+# --- End Middleware ---
 
 # Configure CORS
 app.add_middleware(
@@ -97,6 +124,8 @@ except Exception as e:
     print(f"Error loading model: {str(e)}")
     sys.exit(1)
 
+# --- Route Definitions ---
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
@@ -105,7 +134,6 @@ async def login_page(request: Request):
 async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
-# Use the optional dependency for the home route
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, current_user: Optional[User] = Depends(get_current_user_optional)):
     """Home page - redirects to login if not authenticated."""
@@ -127,9 +155,9 @@ async def metrics():
 # Ensure other protected routes still use the strict dependency
 @app.post("/upload/")
 async def upload_files(
-    request: Request, 
+    request: Request,
     files: list[UploadFile] = File(...),
-    current_user: User = Depends(get_current_user) # Keep strict dependency
+    current_user: User = Depends(get_current_user)
 ):
     """Handle multiple file uploads, classify them, and store results."""
     if not files:
@@ -141,6 +169,7 @@ async def upload_files(
     # Clear organized folder before processing new files
     clear_organized_folder()
     results = []
+    user_email = current_user.email # Get user email
 
     for file in files:
         if not file.filename:
@@ -149,7 +178,7 @@ async def upload_files(
         if not allowed_file(file.filename):
             raise HTTPException(status_code=400, detail=f"Invalid file type: {file.filename}")
 
-        UPLOAD_COUNTER.inc()  # Increment upload counter
+        UPLOAD_COUNTER.labels(user_email=user_email).inc() # Add user_email label
 
         # Save uploaded file
         upload_file_path, random_name = await save_upload_file(file)
@@ -157,8 +186,8 @@ async def upload_files(
         # Time and record the prediction
         start_time = time.time()
         predicted_class = image_processor.predict(str(upload_file_path))
-        PREDICTION_LATENCY.observe(time.time() - start_time)
-        PREDICTION_COUNTER.labels(predicted_class).inc()
+        PREDICTION_LATENCY.labels(user_email=user_email).observe(time.time() - start_time) # Add user_email label
+        PREDICTION_COUNTER.labels(class_name=predicted_class, user_email=user_email).inc() # Add user_email label
 
         # Organize file
         organized_file_path = organize_file(upload_file_path, random_name, predicted_class)
@@ -180,7 +209,7 @@ async def upload_files(
             "timestamp": datetime.now(timezone.utc),
             "drift_detected": False,
             "used_in_training": False,
-            "user_email": current_user.email # Add user's email here
+            "user_email": user_email # Already storing it here
         }
 
         if not db.save_metadata(metadata):
@@ -211,7 +240,7 @@ async def upload_files(
     )
 
 @app.get("/download-zip/")
-async def download_zip(current_user: User = Depends(get_current_user)): # Keep strict dependency
+async def download_zip(current_user: User = Depends(get_current_user)):
     """Download the zip file of organized images."""
     zip_file_path = create_zip_archive()
     if not zip_file_path or not Path(zip_file_path).exists():
@@ -219,7 +248,7 @@ async def download_zip(current_user: User = Depends(get_current_user)): # Keep s
     return FileResponse(zip_file_path, media_type="application/zip")
 
 @app.delete("/delete-image/{predicted_class}/{filename}")
-async def delete_image(predicted_class: str, filename: str, current_user: User = Depends(get_current_user)): # Keep strict dependency
+async def delete_image(predicted_class: str, filename: str, current_user: User = Depends(get_current_user)):
     """Delete an image from the organized folder and its metadata from the database."""
     try:
         # Construct the file path using ORGANIZED_FOLDER from config
@@ -249,10 +278,10 @@ async def delete_image(predicted_class: str, filename: str, current_user: User =
 
 @app.put("/update-class/{old_class}/{filename}")
 async def update_image_class(
-    old_class: str, 
-    filename: str, 
+    old_class: str,
+    filename: str,
     new_class: str,
-    current_user: User = Depends(get_current_user) # Keep strict dependency
+    current_user: User = Depends(get_current_user)
 ):
     """Update the class of an image and move it to the new class folder."""
     try:
