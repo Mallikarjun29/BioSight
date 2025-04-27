@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 import time
 import logging
+from typing import Optional # Import Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Depends, status # Import status
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -34,7 +35,8 @@ try:
     from biosight.utils.image_processor import ImageProcessor
     from biosight.utils.monitoring import PREDICTION_COUNTER, PREDICTION_LATENCY, UPLOAD_COUNTER, get_metrics
     from biosight.routes.auth import router as auth_router
-    from biosight.utils.security import get_current_user  # Import from utils.security instead of routes.auth
+    # Import both user dependency functions
+    from biosight.utils.security import get_current_user, get_current_user_optional 
     from biosight.routes.user import User  # Fixed import path for User model
 except ImportError as e:
     print(f"Error: Could not import from biosight: {e}")
@@ -103,9 +105,15 @@ async def login_page(request: Request):
 async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
+# Use the optional dependency for the home route
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request, current_user: User = Depends(get_current_user)):
-    """Home page - protected by authentication"""
+async def home(request: Request, current_user: Optional[User] = Depends(get_current_user_optional)):
+    """Home page - redirects to login if not authenticated."""
+    if current_user is None:
+        # User not authenticated, redirect to login page
+        return RedirectResponse(url="/login", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        
+    # User is authenticated, render the index page
     return templates.TemplateResponse("index.html", {
         "request": request,
         "user": current_user  # Pass authenticated user to template
@@ -116,11 +124,12 @@ async def metrics():
     """Endpoint for Prometheus metrics."""
     return get_metrics()
 
+# Ensure other protected routes still use the strict dependency
 @app.post("/upload/")
 async def upload_files(
     request: Request, 
     files: list[UploadFile] = File(...),
-    current_user: User = Depends(get_current_user)  # Add authentication requirement
+    current_user: User = Depends(get_current_user) # Keep strict dependency
 ):
     """Handle multiple file uploads, classify them, and store results."""
     if not files:
@@ -170,7 +179,8 @@ async def upload_files(
             "is_updated": False,  # Track if classification has been updated
             "timestamp": datetime.now(timezone.utc),
             "drift_detected": False,
-            "used_in_training": False
+            "used_in_training": False,
+            "user_email": current_user.email # Add user's email here
         }
 
         if not db.save_metadata(metadata):
@@ -201,7 +211,7 @@ async def upload_files(
     )
 
 @app.get("/download-zip/")
-async def download_zip(current_user: User = Depends(get_current_user)):
+async def download_zip(current_user: User = Depends(get_current_user)): # Keep strict dependency
     """Download the zip file of organized images."""
     zip_file_path = create_zip_archive()
     if not zip_file_path or not Path(zip_file_path).exists():
@@ -209,7 +219,7 @@ async def download_zip(current_user: User = Depends(get_current_user)):
     return FileResponse(zip_file_path, media_type="application/zip")
 
 @app.delete("/delete-image/{predicted_class}/{filename}")
-async def delete_image(predicted_class: str, filename: str, current_user: User = Depends(get_current_user)):
+async def delete_image(predicted_class: str, filename: str, current_user: User = Depends(get_current_user)): # Keep strict dependency
     """Delete an image from the organized folder and its metadata from the database."""
     try:
         # Construct the file path using ORGANIZED_FOLDER from config
@@ -242,7 +252,7 @@ async def update_image_class(
     old_class: str, 
     filename: str, 
     new_class: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user) # Keep strict dependency
 ):
     """Update the class of an image and move it to the new class folder."""
     try:
