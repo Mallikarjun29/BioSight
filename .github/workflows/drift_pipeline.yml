@@ -1,0 +1,165 @@
+name: Drift Detection and Retraining Pipeline
+
+on:
+  push:
+    branches: [ main ] # Trigger on pushes to the main branch
+    paths: # Only trigger if files in these paths change
+      - 'drift_detection_and_retraining_pipeline/**'
+      - '.github/workflows/drift_pipeline.yml'
+  workflow_dispatch: # Allow manual triggering from the Actions tab
+
+# Define thresholds for checks (Ideally, read from params.yaml or config)
+env:
+  MIN_DRIFTED_IMAGES_THRESHOLD: 5 # Example: Minimum drifted images needed to proceed with retraining
+  MIN_ACCURACY_THRESHOLD: 50.0    # Example: Minimum test accuracy required for the retrained model
+
+jobs:
+  detect_and_retrain:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Set the working directory for all run steps in this job
+        working-directory: ./drift_detection_and_retraining_pipeline
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for accurate DVC checks if needed
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # Or your project's Python version
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Assuming requirements.txt is inside drift_detection_and_retraining_pipeline
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "Warning: requirements.txt not found in drift_detection_and_retraining_pipeline/"
+          fi
+          # Install DVC (adjust [all] based on your remote storage, e.g., [s3], [gdrive], etc.)
+          pip install dvc
+          # Install jq for parsing JSON report
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run Drift Detection Stage (Manual Check)
+        id: drift_detection
+        run: |
+          echo "Running drift detection script (check_drift stage)..."
+          # Run the command defined in the check_drift stage manually
+          python drift_detection/check_drift_batch.py --models-dir drift_detection/drift_models --output-report drift_check_report.json
+
+          echo "Checking drift report..."
+          # Check the report file to set an output flag
+          # Assumes drift_check_report.json has a top-level field "drift_detected_count"
+          drift_count=$(jq '.drift_detected_count' drift_check_report.json)
+          if [ "$drift_count" -gt 0 ]; then
+            echo "DRIFT DETECTED ($drift_count images) based on drift_check_report.json"
+            echo "drift_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "NO DRIFT DETECTED based on drift_check_report.json"
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+          fi
+        # Fail the job if drift detection script fails
+        continue-on-error: false
+
+      - name: Run DVC Prepare Data Stage
+        id: prepare_data
+        if: steps.drift_detection.outputs.drift_detected == 'true'
+        # Allow this step to 'succeed' even if the script exits 77 (insufficient data)
+        # We will check the output JSON explicitly in the next step.
+        continue-on-error: true
+        run: |
+          echo "Running dvc repro prepare_data..."
+          dvc repro prepare_data
+
+      - name: Check Prepared Data (Quality Gate 1)
+        id: check_prepared_data
+        if: steps.drift_detection.outputs.drift_detected == 'true'
+        run: |
+          echo "Checking prepared data statistics..."
+          # Check if the prepare_data stage actually ran successfully (exit code 0)
+          # The 'outcome' is available if continue-on-error was true for the previous step
+          if [ "${{ steps.prepare_data.outcome }}" == "failure" ]; then
+             echo "::error::DVC prepare_data stage failed. Check logs."
+             exit 1
+          fi
+
+          # Check if the stats file exists
+          if [ ! -f prepared_data_stats.json ]; then
+            echo "::error::prepared_data_stats.json not found after prepare_data stage."
+            exit 1
+          fi
+
+          # Check if enough drifted images were included
+          drifted_included=$(jq '.drifted_images_included' prepared_data_stats.json)
+          echo "Drifted images included in prepared data: $drifted_included"
+          echo "Minimum required: ${{ env.MIN_DRIFTED_IMAGES_THRESHOLD }}"
+
+          if [ "$drifted_included" -lt "${{ env.MIN_DRIFTED_IMAGES_THRESHOLD }}" ]; then
+            echo "::warning::Insufficient drifted images included ($drifted_included < ${{ env.MIN_DRIFTED_IMAGES_THRESHOLD }}). Skipping retraining."
+            # Set output to skip subsequent steps, but don't fail the job
+            echo "proceed_with_retrain=false" >> $GITHUB_OUTPUT
+          else
+            echo "Sufficient drifted images included. Proceeding with retraining."
+            echo "proceed_with_retrain=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run DVC Train Stage
+        if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true'
+        run: |
+          echo "Running dvc repro train..."
+          dvc repro train
+
+      - name: Run DVC Evaluate Stage
+        id: evaluate_model
+        if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true'
+        # Allow this step to 'succeed' even if the script fails, check JSON later
+        continue-on-error: true
+        run: |
+          echo "Running dvc repro evaluate..."
+          # Assuming 'evaluate' stage runs test_model.py and produces test_results.json
+          dvc repro evaluate
+
+      - name: Check Evaluation Results (Quality Gate 2)
+        if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true'
+        run: |
+          echo "Checking evaluation results..."
+          # Check if the evaluate stage actually ran successfully
+          if [ "${{ steps.evaluate_model.outcome }}" == "failure" ]; then
+             echo "::error::DVC evaluate stage failed. Check logs."
+             exit 1
+          fi
+
+          # Check if the results file exists
+          if [ ! -f test_results.json ]; then
+            echo "::error::test_results.json not found after evaluate stage."
+            exit 1
+          fi
+
+          # Check if accuracy meets threshold
+          accuracy=$(jq '.accuracy' test_results.json)
+          echo "Model test accuracy: $accuracy"
+          echo "Minimum required: ${{ env.MIN_ACCURACY_THRESHOLD }}"
+
+          # Use awk for floating point comparison
+          if awk -v acc="$accuracy" -v min_acc="${{ env.MIN_ACCURACY_THRESHOLD }}" 'BEGIN { exit !(acc >= min_acc) }'; then
+            echo "Accuracy threshold met ($accuracy >= ${{ env.MIN_ACCURACY_THRESHOLD }})."
+          else
+            echo "::error::Accuracy threshold NOT met ($accuracy < ${{ env.MIN_ACCURACY_THRESHOLD }})."
+            exit 1 # Fail the job if accuracy is too low
+          fi
+
+      # --- Optional: Commit and Push Results ---
+      # (Keep this section as before if needed, ensure it runs only if checks pass)
+      # - name: Commit and Push Changes
+      #   if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true' # Add condition
+      #   run: |
+      #     git config --global user.name 'github-actions[bot]'
+      #     ...
+      #     git add dvc.lock drift_check_report.json prepared_data_stats.json test_results.json params.yaml models.dvc
+      #     ...
