@@ -57,7 +57,7 @@ if __name__ == "__main__":
 
     # Calculate the correct path relative to this script's location
     script_location = Path(__file__).parent
-    data_directory = script_location.parent.parent / "inaturalist_12K" # Go up two levels to BioSight, then into dataset
+    data_directory = script_location.parent / "inaturalist_12K" # Go up two levels to BioSight, then into dataset
 
     # Create feature extractor
     feature_extractor = FeatureExtractor(model, device)
