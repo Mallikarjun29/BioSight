@@ -46,11 +46,27 @@ jobs:
           # Install jq for parsing JSON report
           sudo apt-get update && sudo apt-get install -y jq
 
+      # --- Optional: Configure DVC Remote Credentials ---
+      # (Keep this section as before if needed)
+      # - name: Configure DVC Remote
+      #   env: ...
+      #   run: ...
+
+      # - name: Pull DVC data and models
+      #   run: dvc pull --force # Pull data/models tracked by DVC
+
+      - name: Train Drift Detector Models
+        run: |
+          echo "Running drift detector training script..."
+          python drift_detection/train_drift.py
+          # This script should save drift_models/drift_detector.joblib and drift_models/feature_extractor.pth
+
       - name: Run Drift Detection Stage (Manual Check)
         id: drift_detection
         run: |
           echo "Running drift detection script (check_drift stage)..."
           # Run the command defined in the check_drift stage manually
+          # It will use the models generated in the previous step
           python drift_detection/check_drift_batch.py --models-dir drift_detection/drift_models --output-report drift_check_report.json
 
           echo "Checking drift report..."

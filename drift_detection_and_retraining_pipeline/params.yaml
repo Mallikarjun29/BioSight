@@ -1,5 +1,5 @@
 # Dataset parameters
-data_dir: ../inaturalist_12K
+data_dir: inaturalist_12K
 max_drifted: 1000
 batch_size: 32
 min_drifted: 10

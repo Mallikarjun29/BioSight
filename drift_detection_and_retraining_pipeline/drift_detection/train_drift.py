@@ -64,7 +64,7 @@ if __name__ == "__main__":
     feature_extractor.eval()
     
     # Set up data loaders
-    data_dir = "../inaturalist_12K"
+    data_dir = "inaturalist_12K"
     batch_size = 64
     data_prep = DataPreparation(str(data_directory), batch_size=batch_size)
     train_loader, val_loader, _ = data_prep.get_data_loaders()
