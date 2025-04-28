@@ -1,7 +1,6 @@
 venv/
 models/
 __pycache__/
-inaturalist_12K/
 drift_models/
 drifted_blur_images/
 uploads/
@@ -10,3 +9,4 @@ organized_images.zip
 best_model_resnet.pth
 mlruns/
 prepared_datasets.pkl
+inaturalist_12K/

@@ -16,6 +16,9 @@ env:
 jobs:
   detect_and_retrain:
     runs-on: ubuntu-latest
+    container:
+      image: act-Drift-Detection-and-Retraining-Pipeline-detect-and-retrain-5330c10d4084f5a3825a5b14a8fcfed0616dab9285010a0375849d98a80f731e
+      options: --shm-size=4g # Increase shared memory size if needed
     defaults:
       run:
         # Set the working directory for all run steps in this job
