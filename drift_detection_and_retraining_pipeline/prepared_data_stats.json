@@ -1,8 +1,8 @@
 {
-    "timestamp": "2025-04-27T19:27:16.386647",
-    "train_size": 8019,
+    "timestamp": "2025-04-29T08:51:05.122832",
+    "train_size": 8139,
     "val_size": 2000,
     "test_size": 2000,
-    "drifted_images_included": 20,
+    "drifted_images_included": 140,
     "batch_size": 32
 }

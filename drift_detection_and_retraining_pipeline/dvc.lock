@@ -6,13 +6,13 @@ stages:
     deps:
     - path: ../inaturalist_12K
       hash: md5
-      md5: 73c3f58093e4de0df0d947996d6c7346.dir
-      size: 3826132050
-      nfiles: 12002
+      md5: 89e7e55d248f1e61ecc608aba08b30a6.dir
+      size: 3827152220
+      nfiles: 36006
     - path: drift_check_report.json
       hash: md5
-      md5: ca698e30e88fcf78b4df3b56c19d206b
-      size: 101
+      md5: cd7c03498f40a9fa924262f86aa65ee7
+      size: 104
     - path: prepare_retrain_data.py
       hash: md5
       md5: 980469018efcf114de57e5aece39e44b
@@ -26,12 +26,12 @@ stages:
     outs:
     - path: prepared_data_stats.json
       hash: md5
-      md5: e5cb2a4f895d1e9fcbc30ab24999b641
-      size: 175
+      md5: 9b168e3145079fb6c555e83c6c6123f1
+      size: 176
     - path: prepared_datasets.pkl
       hash: md5
-      md5: 1fcd6956c41bc5073d38b1707210de6d
-      size: 13065467
+      md5: cc2ead55360d8b34b4c48a1fbb5bae89
+      size: 85355771
   check_drift:
     cmd: "python drift_detection/check_drift_batch.py --models-dir drift_detection/drift_models\n"
     deps:
@@ -45,12 +45,12 @@ stages:
       size: 4315
     - path: drift_detection/drift_models/drift_detector.joblib
       hash: md5
-      md5: f3e2153f28e58e18cae4ccd073c9c1c4
-      size: 20386238
+      md5: c7f141235d6b3fd50486139b91eb755d
+      size: 20386199
     - path: drift_detection/drift_models/feature_extractor.pth
       hash: md5
-      md5: 78e2046244115b90eb8424bbc3426e32
-      size: 94358538
+      md5: ccb59c291b6bbe12cadacc9b0f61afb5
+      size: 94354058
     - path: drift_detection/load_drift_detector.py
       hash: md5
       md5: e792305410b566d7d4cde7ad18b6e640
@@ -58,8 +58,8 @@ stages:
     outs:
     - path: drift_check_report.json
       hash: md5
-      md5: ca698e30e88fcf78b4df3b56c19d206b
-      size: 101
+      md5: cd7c03498f40a9fa924262f86aa65ee7
+      size: 104
   train:
     cmd: "python -m retrain --load-datasets prepared_datasets.pkl --epochs 1 --learning-rate
       0.001 --freeze-strategy upto_stage_3 --dropout-rate 0.5 --experiment-name resnet_drift_retraining\n"

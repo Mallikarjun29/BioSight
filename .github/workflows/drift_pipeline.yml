@@ -12,14 +12,16 @@ on:
 env:
   MIN_DRIFTED_IMAGES_THRESHOLD: 5 # Example: Minimum drifted images needed to proceed with retraining
   MIN_ACCURACY_THRESHOLD: 50.0    # Example: Minimum test accuracy required for the retrained model
+  # Define the pipeline directory for easier path management
+  PIPELINE_DIR: drift_detection_and_retraining_pipeline
 
 jobs:
   detect_and_retrain:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        # Set the working directory for all run steps in this job
-        working-directory: ./drift_detection_and_retraining_pipeline
+    runs-on: nvidia/cuda:12.3.2-cudnn8-devel-ubuntu22.04
+    container:
+      image: catthehacker/ubuntu:act-latest
+      options: --gpus all --runtime=nvidia --shm-size=8g # Increase shared memory size if needed
+    # Removed defaults.run.working-directory
 
     steps:
       - name: Checkout code
@@ -35,33 +37,53 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Assuming requirements.txt is inside drift_detection_and_retraining_pipeline
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+          # Path to requirements.txt relative to repo root
+          REQUIREMENTS_FILE="${PIPELINE_DIR}/requirements.txt"
+          if [ -f "$REQUIREMENTS_FILE" ]; then
+            pip install -r "$REQUIREMENTS_FILE"
           else
-            echo "Warning: requirements.txt not found in drift_detection_and_retraining_pipeline/"
+            echo "Warning: $REQUIREMENTS_FILE not found."
           fi
-          # Install DVC (adjust [all] based on your remote storage, e.g., [s3], [gdrive], etc.)
+          # Install DVC
           pip install dvc
           # Install jq for parsing JSON report
           sudo apt-get update && sudo apt-get install -y jq
+
+      # --- Optional: Configure DVC Remote Credentials ---
+      # (Keep this section as before if needed)
+
+      # - name: Pull DVC data and models
+      #   run: dvc pull --force # Pull data/models tracked by DVC
+
+      - name: Train Drift Detector Models
+        run: |
+          echo "Running drift detector training script..."
+          # Path relative to repo root
+          python ${PIPELINE_DIR}/drift_detection/train_drift.py
+          # This script should save models relative to its location, e.g.,
+          # ${PIPELINE_DIR}/drift_detection/drift_models/...
 
       - name: Run Drift Detection Stage (Manual Check)
         id: drift_detection
         run: |
           echo "Running drift detection script (check_drift stage)..."
-          # Run the command defined in the check_drift stage manually
-          python drift_detection/check_drift_batch.py --models-dir drift_detection/drift_models --output-report drift_check_report.json
+          # Paths relative to repo root
+          MODELS_DIR="${PIPELINE_DIR}/drift_detection/drift_models"
+          REPORT_FILE="${PIPELINE_DIR}/drift_check_report.json"
+          python ${PIPELINE_DIR}/drift_detection/check_drift_batch.py --models-dir "$MODELS_DIR" --output-report "$REPORT_FILE"
 
           echo "Checking drift report..."
+          if [ ! -f "$REPORT_FILE" ]; then
+             echo "::error::Drift report file $REPORT_FILE not found!"
+             exit 1
+          fi
           # Check the report file to set an output flag
-          # Assumes drift_check_report.json has a top-level field "drift_detected_count"
-          drift_count=$(jq '.drift_detected_count' drift_check_report.json)
+          drift_count=$(jq '.drift_detected_count // 0' "$REPORT_FILE") # Default to 0 if key missing
           if [ "$drift_count" -gt 0 ]; then
-            echo "DRIFT DETECTED ($drift_count images) based on drift_check_report.json"
+            echo "DRIFT DETECTED ($drift_count images) based on $REPORT_FILE"
             echo "drift_detected=true" >> $GITHUB_OUTPUT
           else
-            echo "NO DRIFT DETECTED based on drift_check_report.json"
+            echo "NO DRIFT DETECTED based on $REPORT_FILE"
             echo "drift_detected=false" >> $GITHUB_OUTPUT
           fi
         # Fail the job if drift detection script fails
@@ -70,39 +92,40 @@ jobs:
       - name: Run DVC Prepare Data Stage
         id: prepare_data
         if: steps.drift_detection.outputs.drift_detected == 'true'
-        # Allow this step to 'succeed' even if the script exits 77 (insufficient data)
-        # We will check the output JSON explicitly in the next step.
         continue-on-error: true
         run: |
           echo "Running dvc repro prepare_data..."
+          # Change directory to run dvc repro in the context of dvc.yaml
+          cd ${PIPELINE_DIR}
           dvc repro prepare_data
+          # Change back if needed, though subsequent steps also cd
+          # cd ..
 
       - name: Check Prepared Data (Quality Gate 1)
         id: check_prepared_data
         if: steps.drift_detection.outputs.drift_detected == 'true'
         run: |
           echo "Checking prepared data statistics..."
-          # Check if the prepare_data stage actually ran successfully (exit code 0)
-          # The 'outcome' is available if continue-on-error was true for the previous step
+          # Check outcome from the previous step
           if [ "${{ steps.prepare_data.outcome }}" == "failure" ]; then
              echo "::error::DVC prepare_data stage failed. Check logs."
              exit 1
           fi
 
-          # Check if the stats file exists
-          if [ ! -f prepared_data_stats.json ]; then
-            echo "::error::prepared_data_stats.json not found after prepare_data stage."
+          # Path to stats file relative to repo root
+          STATS_FILE="${PIPELINE_DIR}/prepared_data_stats.json"
+          if [ ! -f "$STATS_FILE" ]; then
+            echo "::error::$STATS_FILE not found after prepare_data stage."
             exit 1
           fi
 
           # Check if enough drifted images were included
-          drifted_included=$(jq '.drifted_images_included' prepared_data_stats.json)
+          drifted_included=$(jq '.drifted_images_included // 0' "$STATS_FILE") # Default to 0
           echo "Drifted images included in prepared data: $drifted_included"
           echo "Minimum required: ${{ env.MIN_DRIFTED_IMAGES_THRESHOLD }}"
 
           if [ "$drifted_included" -lt "${{ env.MIN_DRIFTED_IMAGES_THRESHOLD }}" ]; then
             echo "::warning::Insufficient drifted images included ($drifted_included < ${{ env.MIN_DRIFTED_IMAGES_THRESHOLD }}). Skipping retraining."
-            # Set output to skip subsequent steps, but don't fail the job
             echo "proceed_with_retrain=false" >> $GITHUB_OUTPUT
           else
             echo "Sufficient drifted images included. Proceeding with retraining."
@@ -113,36 +136,39 @@ jobs:
         if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true'
         run: |
           echo "Running dvc repro train..."
+          # Change directory to run dvc repro
+          cd ${PIPELINE_DIR}
           dvc repro train
 
       - name: Run DVC Evaluate Stage
         id: evaluate_model
         if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true'
-        # Allow this step to 'succeed' even if the script fails, check JSON later
         continue-on-error: true
         run: |
           echo "Running dvc repro evaluate..."
-          # Assuming 'evaluate' stage runs test_model.py and produces test_results.json
+          # Change directory to run dvc repro
+          cd ${PIPELINE_DIR}
           dvc repro evaluate
 
       - name: Check Evaluation Results (Quality Gate 2)
         if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true'
         run: |
           echo "Checking evaluation results..."
-          # Check if the evaluate stage actually ran successfully
+          # Check outcome from the previous step
           if [ "${{ steps.evaluate_model.outcome }}" == "failure" ]; then
              echo "::error::DVC evaluate stage failed. Check logs."
              exit 1
           fi
 
-          # Check if the results file exists
-          if [ ! -f test_results.json ]; then
-            echo "::error::test_results.json not found after evaluate stage."
+          # Path to results file relative to repo root
+          RESULTS_FILE="${PIPELINE_DIR}/test_results.json"
+          if [ ! -f "$RESULTS_FILE" ]; then
+            echo "::error::$RESULTS_FILE not found after evaluate stage."
             exit 1
           fi
 
           # Check if accuracy meets threshold
-          accuracy=$(jq '.accuracy' test_results.json)
+          accuracy=$(jq '.accuracy // 0' "$RESULTS_FILE") # Default to 0
           echo "Model test accuracy: $accuracy"
           echo "Minimum required: ${{ env.MIN_ACCURACY_THRESHOLD }}"
 
@@ -155,11 +181,12 @@ jobs:
           fi
 
       # --- Optional: Commit and Push Results ---
-      # (Keep this section as before if needed, ensure it runs only if checks pass)
+      # (Adjust paths for git add relative to repo root)
       # - name: Commit and Push Changes
-      #   if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true' # Add condition
+      #   if: steps.check_prepared_data.outputs.proceed_with_retrain == 'true'
       #   run: |
       #     git config --global user.name 'github-actions[bot]'
       #     ...
-      #     git add dvc.lock drift_check_report.json prepared_data_stats.json test_results.json params.yaml models.dvc
+      #     # Paths relative to repo root
+      #     git add ${PIPELINE_DIR}/dvc.lock ${PIPELINE_DIR}/drift_check_report.json ${PIPELINE_DIR}/prepared_data_stats.json ${PIPELINE_DIR}/test_results.json ${PIPELINE_DIR}/params.yaml ${PIPELINE_DIR}/models.dvc
       #     ...
